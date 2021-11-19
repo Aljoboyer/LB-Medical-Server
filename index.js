@@ -6,6 +6,7 @@ var admin = require("firebase-admin");
 const fileupload = require('express-fileupload')
 const ObjectId = require('mongodb').ObjectId;
 require('dotenv').config();
+const stripe = require('stripe')(process.env.STRIPE_SECRET)
 const port = process.env.PORT || 5000;
 
 //firebase admin
@@ -45,10 +46,44 @@ async function run(){
 
         const database = client.db('MedicalserviceDB');
         const MediserviceCollection = database.collection('MediserviceCollection');
-        const PatientCollection = database.collection('PatientCollection');
         const UserCollection = database.collection('UserCollection');
         const DocAppointmentCollection = database.collection('DocAppointmentCollection')
         const PatientAppointmetnCollection = database.collection('PatientAppointmetnCollection')
+        
+        
+        
+        //geting individual id for payment
+       app.get('/payappointment/:id', async(req,res) => {
+        const id = req.params.id;
+        const query = {_id: ObjectId(id)};
+        const result = await PatientAppointmetnCollection.findOne(query);
+        res.send(result)
+    })
+       //payment system
+       app.post('/create-payment-intent', async(req, res) => {
+        const paymetninfo = req.body;
+        const amount = paymetninfo.price * 100;
+        const paymentIntent = await stripe.paymentIntents.create({
+            currency: 'usd',
+            amount: amount,
+            payment_method_types: ['card']
+        });
+        res.json({clientSecret: paymentIntent.client_secret})
+    })
+    //updating appointment after payment
+    app.put('/appointmentpayment/:id' , async(req, res) => {
+        const id = req.params.id;
+        const payment = req.body;
+        const filter = {_id: ObjectId(id)};
+        const option= {upsert: true};
+        const updatedoc = {
+            $set:{
+                payment: payment
+            }
+        }
+        const result = await PatientAppointmetnCollection.updateOne(filter, updatedoc, option);
+        res.json(result)
+    })
         //geting all service
         app.get('/services', async(req, res) => {
             const cursor = MediserviceCollection.find({});
@@ -126,25 +161,7 @@ async function run(){
             const result = await MediserviceCollection.findOne(query);
             res.send(result);
         })
-        app.post('/getservice', async(req, res) => {
-            const service = req.body;
-            const result = await PatientCollection.insertOne(service);
-            res.json(result)
-        })
-        //get patients individual service
-        app.get('/patientservice',VrifyToken, async(req, res) => {
-                const email = req.query.email;
-                if(req.decodedEmail === email)
-                {
-                    const query = {email: email};
-                    const cursor =  PatientCollection.find(query);
-                    const result = await cursor.toArray();
-                    res.send(result)
-                }
-                else{
-                    res.status(401).json({message: 'User Not Authorised'})
-                }
-        })
+
         //user delete servic
         app.delete('/deleteservice/:id', async( req, res) => {
             const id = req.params.id;
@@ -228,9 +245,11 @@ async function run(){
         //geting patient individual appointment
         app.get('/patientappointment',VrifyToken, async(req, res) => {
             const email = req.query.email;
+            const category = req.query.category;
+            console.log('this',category)
             if(req.decodedEmail === email)
-            {
-                const query = {email: email};
+            {   
+                const query = {email: email, category:category};
                 const cursor =  PatientAppointmetnCollection.find(query);
                 const result = await cursor.toArray();
                 res.send(result)
@@ -245,7 +264,7 @@ async function run(){
             const result = await PatientAppointmetnCollection.deleteOne(query)
             res.send(result)
         })
-       
+     
 
     })
     }
